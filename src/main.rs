@@ -13,13 +13,8 @@ use iced::{ Theme, Color };
 use iced::widget::text_editor; // if you have the multi-line editor in your version
 // or keep text_input for now
 
-
 pub fn main() -> iced::Result {
-    iced::run(
-        "Protocol Alarm",
-        update,
-        view,
-    )
+    iced::run("Protocol Alarm", update, view)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -89,6 +84,9 @@ enum Message {
 fn update(state: &mut ProtocolAlarmApp, message: Message) -> Task<Message> {
     match message {
         Message::Tick(now) => {
+            if load_protocol().is_empty() {
+                state.protocol_text = load_protocol();
+            }
             state.current_time = now.clone();
 
             // If this is the first Tick after startup, start ticking
@@ -114,7 +112,7 @@ fn update(state: &mut ProtocolAlarmApp, message: Message) -> Task<Message> {
                             alarm.recites
                         );
                         for _ in 0..alarm.recites {
-                            speak_protocol(&state.protocol_text);
+                            speak_protocol(load_protocol().as_str());
                         }
                     }
                 }
@@ -222,7 +220,7 @@ fn update(state: &mut ProtocolAlarmApp, message: Message) -> Task<Message> {
         }
 
         Message::ReciteProtocol => {
-            speak_protocol(&state.protocol_text); // manual trigger, single recite
+            speak_protocol(load_protocol().as_str());
             Task::none()
         }
 
@@ -439,7 +437,7 @@ fn secondary_button_style(_theme: &Theme, _status: button::Status) -> button::St
 }
 
 fn speak_protocol(text: &str) {
-    let status = ProcCommand::new("say").arg("-r").arg("180").arg(load_protocol()).status();
+    let status = ProcCommand::new("say").arg("-r").arg("180").arg(text).status();
 
     if let Err(e) = status {
         eprintln!("Failed to execute `say`: {}", e);

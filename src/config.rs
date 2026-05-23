@@ -11,11 +11,24 @@ fn protocol_path() -> PathBuf {
 
 pub fn load_protocol() -> String {
     let path = protocol_path();
-    fs::read_to_string(&path).unwrap_or_else(|_| {
-        // default content if file missing or unreadable
-        r#"Protocol.
+
+    // 1) Try to read the file; on error, use empty string.
+    let contents = fs::read_to_string(&path).unwrap_or_default();
+
+    // 2) If it's empty / whitespace, fall back to default text.
+    if contents.trim().is_empty() {
+        default_protocol_text()
+    } else {
+        contents
+    }
+}
+
+fn default_protocol_text() -> String {
+    r#"Protocol.
+
 
 Follow only these rules.
+
 
 Rule 1: Pay attention only when price is near the middle Bollinger Band.
 Rule 2: Never chase overbought or oversold prices.
@@ -23,10 +36,11 @@ Rule 3: Always use a stop loss.
 Rule 4: Never average down.
 Rule 5: Stop trading when the account is down to 300 at 0.01 lot size, or 3000 at 0.3 lot size.
 
+
 For clarity:
 Step 1: Meditate using box breathing as often as possible.
-Step 2: Spend the remaining time practicing guitar."#.to_string()
-    })
+Step 2: Spend the remaining time practicing guitar."#
+        .to_string()
 }
 
 pub fn save_protocol(contents: &str) -> io::Result<()> {
