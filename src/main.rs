@@ -1,11 +1,15 @@
-use chrono::{Datelike, Local};
-use iced::widget::{button, column, container, row, scrollable, text, text_input, radio};
-use iced::{Element, Length, Task};
+use chrono::{ Datelike, Local };
+use iced::widget::{ button, column, container, row, scrollable, text, text_input, radio };
+use iced::{ Element, Length, Task };
 use std::collections::HashSet;
 use std::process::Command as ProcCommand;
-use tokio::time::{sleep, Duration};
+use tokio::time::{ sleep, Duration };
+
+use iced::{ Theme, Color };
 
 pub fn main() -> iced::Result {
+    // This uses the functional API introduced in Iced 0.13.
+    // Make sure Cargo.toml has: iced = { version = "0.13", features = ["tokio"] }
     iced::run("Protocol Alarm", update, view)
 }
 
@@ -39,18 +43,18 @@ impl DayPattern {
 
 #[derive(Clone)]
 struct Alarm {
-    time: String,        // "HH:MM"
+    time: String, // "HH:MM"
     pattern: DayPattern, // when it repeats
-    recites: u32,        // how many times to recite when it fires
+    recites: u32, // how many times to recite when it fires
 }
 
 #[derive(Default)]
 struct ProtocolAlarmApp {
     current_time: String,
-    alarm_time_input: String,      // single HH:MM input
-    recites_input: String,         // user input for recites (string)
-    selected_pattern: DayPattern,  // pattern for new alarms
-    alarms: Vec<Alarm>,            // list of alarms
+    alarm_time_input: String, // single HH:MM input
+    recites_input: String, // user input for recites (string)
+    selected_pattern: DayPattern, // pattern for new alarms
+    alarms: Vec<Alarm>, // list of alarms
     status: String,
     ticking: bool,
     fired_minutes: HashSet<String>, // which HH:MM have already fired this minute
@@ -71,6 +75,11 @@ fn update(state: &mut ProtocolAlarmApp, message: Message) -> Task<Message> {
     match message {
         Message::Tick(now) => {
             state.current_time = now.clone();
+
+            // If this is the first Tick after startup, start ticking
+            if !state.ticking {
+                state.ticking = true;
+            }
 
             // New minute? Clear fired markers so alarms can fire again later.
             if !state.fired_minutes.contains(&now) {
@@ -100,11 +109,10 @@ fn update(state: &mut ProtocolAlarmApp, message: Message) -> Task<Message> {
                 }
             }
 
-            // Only keep ticking while there is at least one alarm
-            if state.ticking && !state.alarms.is_empty() {
+            // Keep ticking while there is at least one alarm
+            if state.ticking {
                 Task::perform(tick_loop(), Message::Tick)
             } else {
-                state.ticking = false;
                 Task::none()
             }
         }
@@ -141,10 +149,11 @@ fn update(state: &mut ProtocolAlarmApp, message: Message) -> Task<Message> {
             }
 
             // Avoid duplicates with same time + pattern + recites
-            let exists = state
-                .alarms
+            let exists = state.alarms
                 .iter()
-                .any(|a| a.time == raw && a.pattern == state.selected_pattern && a.recites == recites);
+                .any(
+                    |a| a.time == raw && a.pattern == state.selected_pattern && a.recites == recites
+                );
 
             if !exists {
                 state.alarms.push(Alarm {
@@ -160,6 +169,8 @@ fn update(state: &mut ProtocolAlarmApp, message: Message) -> Task<Message> {
                 );
                 state.alarm_time_input.clear();
                 state.recites_input.clear();
+
+                // Start ticking if we weren't already
                 state.ticking = true;
                 state.fired_minutes.clear();
                 Task::perform(tick_loop(), Message::Tick)
@@ -208,23 +219,32 @@ fn update(state: &mut ProtocolAlarmApp, message: Message) -> Task<Message> {
 }
 
 fn view(state: &ProtocolAlarmApp) -> Element<'_, Message> {
-    // Header
-    let header = container(text("Protocol Alarm").size(28))
-        .width(Length::Fill);
+    // Header styled a bit more like your target UI
+    let header = container(
+        column![
+            text("Recite Protocol").size(24),
+            text("Scheduled sentence recitation for macOS").size(14),
+            text("Tip: grant Accessibility permission for full kiosk lock during recitation.").size(
+                14
+            )
+        ].spacing(4)
+    )
+        .width(Length::Fill)
+        .padding(8);
 
     // Current time + manual recite
     let time_row = row![
         text("Current time:").size(16),
-        text(&state.current_time).size(24),
+        text(&state.current_time).size(32),
+        // Recite now button
         button("Recite now")
             .padding([6, 12])
-            .on_press(Message::ReciteProtocol),
-    ]
-    .spacing(16);
+            .style(primary_button_style)
+            .width(Length::Fixed(100.0))
+            .on_press(Message::ReciteProtocol)
+    ].spacing(16);
 
-    let time_card = container(time_row)
-        .padding(12)
-        .width(Length::Fill);
+    let time_card = container(time_row).padding(12).width(Length::Fill);
 
     // Day pattern selection
     let pattern_row = row![
@@ -246,9 +266,8 @@ fn view(state: &ProtocolAlarmApp) -> Element<'_, Message> {
             DayPattern::Everyday,
             Some(state.selected_pattern),
             Message::PatternChanged
-        ),
-    ]
-    .spacing(12);
+        )
+    ].spacing(12);
 
     // Input row: time + recites
     let input_row = row![
@@ -256,27 +275,25 @@ fn view(state: &ProtocolAlarmApp) -> Element<'_, Message> {
             text("Alarm time").size(14),
             text_input("HH:MM", &state.alarm_time_input)
                 .on_input(Message::AlarmTimeChanged)
-                .width(Length::Fixed(80.0)),
-        ]
-        .spacing(4),
+                .width(Length::Fixed(80.0))
+        ].spacing(4),
         column![
             text("Recites").size(14),
             text_input("1", &state.recites_input)
                 .on_input(Message::RecitesChanged)
-                .width(Length::Fixed(50.0)),
-        ]
-        .spacing(4),
+                .width(Length::Fixed(50.0))
+        ].spacing(4),
+        // Add alarm button
         button("Add alarm")
             .padding([8, 14])
-            .on_press(Message::AddAlarmPressed),
-    ]
-    .spacing(16);
+            .style(primary_button_style)
+            .width(Length::Fixed(100.0))
+            .on_press(Message::AddAlarmPressed)
+    ].spacing(16);
 
-    let config_card = container(
-        column![pattern_row, input_row].spacing(12)
-    )
-    .padding(12)
-    .width(Length::Fill);
+    let config_card = container(column![pattern_row, input_row].spacing(12))
+        .padding(12)
+        .width(Length::Fill);
 
     // List alarms with cancel buttons
     let mut alarm_list = column![];
@@ -284,23 +301,19 @@ fn view(state: &ProtocolAlarmApp) -> Element<'_, Message> {
         alarm_list = alarm_list.push(text("No alarms set yet.").size(14));
     } else {
         for (i, alarm) in state.alarms.iter().enumerate() {
-            let label = format!(
-                "{} • {} • x{}",
-                alarm.time,
-                alarm.pattern.label(),
-                alarm.recites
-            );
+            let label = format!("{} • {} • x{}", alarm.time, alarm.pattern.label(), alarm.recites);
             alarm_list = alarm_list.push(
                 container(
                     row![
                         text(label).size(16),
+                        // Cancel button
                         button("Cancel")
                             .padding([4, 10])
-                            .on_press(Message::CancelAlarm(i)),
-                    ]
-                    .spacing(12),
-                )
-                .padding(8),
+                            .style(secondary_button_style)
+                            .width(Length::Fixed(100.0))
+                            .on_press(Message::CancelAlarm(i))
+                    ].spacing(12)
+                ).padding(8)
             );
         }
     }
@@ -308,12 +321,11 @@ fn view(state: &ProtocolAlarmApp) -> Element<'_, Message> {
     let alarm_card = container(
         column![
             text("Scheduled alarms").size(18),
-            scrollable(alarm_list).height(Length::Fixed(180.0)),
-        ]
-        .spacing(8),
+            scrollable(alarm_list).height(Length::Fixed(180.0))
+        ].spacing(8)
     )
-    .padding(12)
-    .width(Length::Fill);
+        .padding(12)
+        .width(Length::Fill);
 
     let status_text = if state.status.is_empty() {
         text("Ready.").size(14)
@@ -321,21 +333,14 @@ fn view(state: &ProtocolAlarmApp) -> Element<'_, Message> {
         text(&state.status).size(14)
     };
 
-    let content = column![
-        header,
-        time_card,
-        config_card,
-        alarm_card,
-        status_text,
-    ]
-    .spacing(16)
-    .padding(16)
-    .max_width(520);
+    let content = column![header, time_card, config_card, alarm_card, status_text]
+        .spacing(16)
+        .padding(16) // already OK
+        .max_width(520);
 
     container(content)
         .width(Length::Fill)
         .height(Length::Fill)
-        // Center the 520‑px column in the window
         .center_x(Length::Fill)
         .center_y(Length::Fill)
         .into()
@@ -346,8 +351,38 @@ async fn tick_loop() -> String {
     Local::now().format("%H:%M").to_string()
 }
 
+fn primary_button_style(_theme: &Theme, _status: button::Status) -> button::Style {
+    button::Style {
+        // dark-ish rectangle
+        background: Some(iced::Background::Color(Color::from_rgb(0.2, 0.22, 0.25))),
+        // bright text
+        text_color: Color::from_rgb(0.95, 0.95, 0.97),
+        // subtle rounded border
+        border: iced::Border {
+            color: Color::from_rgb(0.35, 0.35, 0.4),
+            width: (1.0).into(),
+            radius: (6.0).into(),
+        },
+        shadow: iced::Shadow::default(),
+    }
+}
+
+fn secondary_button_style(_theme: &Theme, _status: button::Status) -> button::Style {
+    button::Style {
+        background: Some(iced::Background::Color(Color::from_rgb(0.16, 0.17, 0.19))),
+        text_color: Color::from_rgb(0.8, 0.82, 0.86),
+        border: iced::Border {
+            color: Color::from_rgb(0.3, 0.32, 0.35),
+            width: (1.0).into(),
+            radius: (6.0).into(),
+        },
+        shadow: iced::Shadow::default(),
+    }
+}
+
 fn speak_protocol() {
-    let text = r#"Protocol.
+    let text =
+        r#"Protocol.
 
 Follow only these rules.
 
@@ -361,11 +396,7 @@ For clarity:
 Step 1: Meditate using box breathing as often as possible.
 Step 2: Spend the remaining time practicing guitar."#;
 
-    let status = ProcCommand::new("say")
-        .arg("-r")
-        .arg("180")
-        .arg(text)
-        .status();
+    let status = ProcCommand::new("say").arg("-r").arg("180").arg(text).status();
 
     if let Err(e) = status {
         eprintln!("Failed to execute `say`: {}", e);
