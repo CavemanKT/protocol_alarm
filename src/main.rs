@@ -1,5 +1,5 @@
 use chrono::{Datelike, Local};
-use iced::widget::{button, column, row, text, text_input, radio};
+use iced::widget::{button, column, container, row, scrollable, text, text_input, radio};
 use iced::{Element, Length, Task};
 use std::collections::HashSet;
 use std::process::Command as ProcCommand;
@@ -208,22 +208,27 @@ fn update(state: &mut ProtocolAlarmApp, message: Message) -> Task<Message> {
 }
 
 fn view(state: &ProtocolAlarmApp) -> Element<'_, Message> {
-    let header = text("Protocol Alarm").size(30);
+    // Header
+    let header = container(text("Protocol Alarm").size(28))
+        .width(Length::Fill);
 
+    // Current time + manual recite
     let time_row = row![
-        text("Current time:"),
-        text(&state.current_time).size(20)
+        text("Current time:").size(16),
+        text(&state.current_time).size(24),
+        button("Recite now")
+            .padding([6, 12])
+            .on_press(Message::ReciteProtocol),
     ]
-    .spacing(8);
+    .spacing(16);
 
-    let recite_button_row = row![
-        button("Recite protocol now").on_press(Message::ReciteProtocol),
-    ]
-    .spacing(8);
+    let time_card = container(time_row)
+        .padding(12)
+        .width(Length::Fill);
 
     // Day pattern selection
     let pattern_row = row![
-        text("Repeat on: "),
+        text("Repeat on:").size(16),
         radio(
             "Weekdays",
             DayPattern::Weekdays,
@@ -243,59 +248,97 @@ fn view(state: &ProtocolAlarmApp) -> Element<'_, Message> {
             Message::PatternChanged
         ),
     ]
-    .spacing(8);
+    .spacing(12);
 
-    // Input row: add alarms one by one, with recites
+    // Input row: time + recites
     let input_row = row![
-        text("Alarm (HH:MM):"),
-        text_input("e.g. 09:30", &state.alarm_time_input)
-            .on_input(Message::AlarmTimeChanged)
-            .width(Length::Fixed(80.0)),
-        text("Recites:"),
-        text_input("1", &state.recites_input)
-            .on_input(Message::RecitesChanged)
-            .width(Length::Fixed(40.0)),
-        button("Add alarm").on_press(Message::AddAlarmPressed),
+        column![
+            text("Alarm time").size(14),
+            text_input("HH:MM", &state.alarm_time_input)
+                .on_input(Message::AlarmTimeChanged)
+                .width(Length::Fixed(80.0)),
+        ]
+        .spacing(4),
+        column![
+            text("Recites").size(14),
+            text_input("1", &state.recites_input)
+                .on_input(Message::RecitesChanged)
+                .width(Length::Fixed(50.0)),
+        ]
+        .spacing(4),
+        button("Add alarm")
+            .padding([8, 14])
+            .on_press(Message::AddAlarmPressed),
     ]
-    .spacing(8);
+    .spacing(16);
+
+    let config_card = container(
+        column![pattern_row, input_row].spacing(12)
+    )
+    .padding(12)
+    .width(Length::Fill);
 
     // List alarms with cancel buttons
     let mut alarm_list = column![];
     if state.alarms.is_empty() {
-        alarm_list = alarm_list.push(text("Alarms: None set"));
+        alarm_list = alarm_list.push(text("No alarms set yet.").size(14));
     } else {
-        alarm_list = alarm_list.push(text("Alarms:"));
         for (i, alarm) in state.alarms.iter().enumerate() {
             let label = format!(
-                "{} ({}, x{})",
+                "{} • {} • x{}",
                 alarm.time,
                 alarm.pattern.label(),
                 alarm.recites
             );
             alarm_list = alarm_list.push(
-                row![
-                    text(label),
-                    button("Cancel").on_press(Message::CancelAlarm(i))
-                ]
-                .spacing(8),
+                container(
+                    row![
+                        text(label).size(16),
+                        button("Cancel")
+                            .padding([4, 10])
+                            .on_press(Message::CancelAlarm(i)),
+                    ]
+                    .spacing(12),
+                )
+                .padding(8),
             );
         }
     }
 
-    let status = text(&state.status).size(16);
+    let alarm_card = container(
+        column![
+            text("Scheduled alarms").size(18),
+            scrollable(alarm_list).height(Length::Fixed(180.0)),
+        ]
+        .spacing(8),
+    )
+    .padding(12)
+    .width(Length::Fill);
 
-    column![
+    let status_text = if state.status.is_empty() {
+        text("Ready.").size(14)
+    } else {
+        text(&state.status).size(14)
+    };
+
+    let content = column![
         header,
-        time_row,
-        recite_button_row,
-        pattern_row,
-        input_row,
-        alarm_list,
-        status
+        time_card,
+        config_card,
+        alarm_card,
+        status_text,
     ]
-    .spacing(12)
+    .spacing(16)
     .padding(16)
-    .into()
+    .max_width(520);
+
+    container(content)
+        .width(Length::Fill)
+        .height(Length::Fill)
+        // Center the 520‑px column in the window
+        .center_x(Length::Fill)
+        .center_y(Length::Fill)
+        .into()
 }
 
 async fn tick_loop() -> String {
