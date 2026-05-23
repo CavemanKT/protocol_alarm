@@ -1,3 +1,6 @@
+mod config;
+use crate::config::{ load_protocol, save_protocol };
+
 use chrono::{ Datelike, Local };
 use iced::widget::{ button, column, container, row, scrollable, text, text_input, radio };
 use iced::{ Element, Length, Task };
@@ -7,10 +10,16 @@ use tokio::time::{ sleep, Duration };
 
 use iced::{ Theme, Color };
 
+use iced::widget::text_editor; // if you have the multi-line editor in your version
+// or keep text_input for now
+
+
 pub fn main() -> iced::Result {
-    // This uses the functional API introduced in Iced 0.13.
-    // Make sure Cargo.toml has: iced = { version = "0.13", features = ["tokio"] }
-    iced::run("Protocol Alarm", update, view)
+    iced::run(
+        "Protocol Alarm",
+        update,
+        view,
+    )
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -58,6 +67,9 @@ struct ProtocolAlarmApp {
     status: String,
     ticking: bool,
     fired_minutes: HashSet<String>, // which HH:MM have already fired this minute
+
+    protocol_text: String, // contents loaded from file
+    protocol_dirty: bool, // whether user has unsaved edits
 }
 
 #[derive(Debug, Clone)]
@@ -69,6 +81,9 @@ enum Message {
     CancelAlarm(usize),
     ReciteProtocol,
     PatternChanged(DayPattern),
+
+    ProtocolChanged(String),
+    SaveProtocolPressed,
 }
 
 fn update(state: &mut ProtocolAlarmApp, message: Message) -> Task<Message> {
@@ -99,7 +114,7 @@ fn update(state: &mut ProtocolAlarmApp, message: Message) -> Task<Message> {
                             alarm.recites
                         );
                         for _ in 0..alarm.recites {
-                            speak_protocol();
+                            speak_protocol(&state.protocol_text);
                         }
                     }
                 }
@@ -207,12 +222,31 @@ fn update(state: &mut ProtocolAlarmApp, message: Message) -> Task<Message> {
         }
 
         Message::ReciteProtocol => {
-            speak_protocol(); // manual trigger, single recite
+            speak_protocol(&state.protocol_text); // manual trigger, single recite
             Task::none()
         }
 
         Message::PatternChanged(pattern) => {
             state.selected_pattern = pattern;
+            Task::none()
+        }
+
+        Message::ProtocolChanged(value) => {
+            state.protocol_text = value;
+            state.protocol_dirty = true;
+            Task::none()
+        }
+
+        Message::SaveProtocolPressed => {
+            match save_protocol(&state.protocol_text) {
+                Ok(_) => {
+                    state.status = "Saved protocol.".into();
+                    state.protocol_dirty = false;
+                }
+                Err(e) => {
+                    state.status = format!("Failed to save protocol: {}", e);
+                }
+            }
             Task::none()
         }
     }
@@ -333,9 +367,33 @@ fn view(state: &ProtocolAlarmApp) -> Element<'_, Message> {
         text(&state.status).size(14)
     };
 
-    let content = column![header, time_card, config_card, alarm_card, status_text]
+    let protocol_section = container(
+        column![
+            text("Protocol text").size(18),
+            // if you have text_editor in your version:
+            // text_editor(&state.protocol_text)
+            //     .on_edit(Message::ProtocolChanged)
+            //     .height(Length::Fixed(150.0)),
+
+            // Fallback: simple text_input (single line)
+            text_input("Protocol...", &state.protocol_text)
+                .on_input(Message::ProtocolChanged)
+                .width(Length::Fill),
+
+            row![
+                button(if state.protocol_dirty { "Save protocol" } else { "Saved" })
+                    .padding([6, 12])
+                    .style(primary_button_style)
+                    .on_press(Message::SaveProtocolPressed)
+            ].spacing(8)
+        ].spacing(8)
+    )
+        .padding(12)
+        .width(Length::Fill);
+
+    let content = column![header, time_card, config_card, alarm_card, protocol_section, status_text]
         .spacing(16)
-        .padding(16) // already OK
+        .padding(16)
         .max_width(520);
 
     container(content)
@@ -380,23 +438,8 @@ fn secondary_button_style(_theme: &Theme, _status: button::Status) -> button::St
     }
 }
 
-fn speak_protocol() {
-    let text =
-        r#"Protocol.
-
-Follow only these rules.
-
-Rule 1: Pay attention only when price is near the middle Bollinger Band.
-Rule 2: Never chase overbought or oversold prices.
-Rule 3: Always use a stop loss.
-Rule 4: Never average down.
-Rule 5: Stop trading when the account is down to 300 at 0.01 lot size, or 3000 at 0.3 lot size.
-
-For clarity:
-Step 1: Meditate using box breathing as often as possible.
-Step 2: Spend the remaining time practicing guitar."#;
-
-    let status = ProcCommand::new("say").arg("-r").arg("180").arg(text).status();
+fn speak_protocol(text: &str) {
+    let status = ProcCommand::new("say").arg("-r").arg("180").arg(load_protocol()).status();
 
     if let Err(e) = status {
         eprintln!("Failed to execute `say`: {}", e);

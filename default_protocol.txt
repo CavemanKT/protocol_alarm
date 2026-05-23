@@ -1,0 +1,11 @@
+Protocol
+
+1. Only follow the rule
+    1. Rule1: only pay attention when the price is around middle band in Bollinger band
+    2. Rule2: never chase overbought or oversold
+    3. Rule3: always set stop loss
+    4. Rule4: never averaging down
+    5. Rule5: offline when down to 300 with 0.01 volume, that is 3000 with 0.3
+2. To get more clarity
+    1. Step1: meditate with box breathing technique as often as we can
+    2. Step2: spend the rest of the time to play guitar
