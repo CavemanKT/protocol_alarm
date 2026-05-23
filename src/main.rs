@@ -1,7 +1,8 @@
 use chrono::Local;
 use iced::widget::{button, column, row, text, text_input};
-use iced::{Element, Length};
+use iced::{Element, Length, Task};
 use std::process::Command as ProcCommand;
+use tokio::time::{sleep, Duration};
 
 pub fn main() -> iced::Result {
     iced::run("Protocol Alarm", update, view)
@@ -13,38 +14,62 @@ struct ProtocolAlarmApp {
     alarm_time_input: String,
     alarm_time_set: Option<String>,
     status: String,
+    last_checked: String,
+    ticking: bool,
 }
 
 #[derive(Debug, Clone)]
 enum Message {
+    Tick(String),
     AlarmTimeChanged(String),
     SetAlarmPressed,
     ReciteProtocol,
 }
 
-fn update(state: &mut ProtocolAlarmApp, message: Message) -> iced::Task<Message> {
-    // Update current time on every update
-    state.current_time = Local::now().format("%H:%M").to_string();
-
+fn update(state: &mut ProtocolAlarmApp, message: Message) -> Task<Message> {
     match message {
+        Message::Tick(now) => {
+            state.current_time = now.clone();
+            state.last_checked = now.clone();
+            state.ticking = true;
+
+            if let Some(ref alarm) = state.alarm_time_set {
+                if &now == alarm {
+                    state.status = "Alarm triggered – reciting protocol...".into();
+                    speak_protocol();
+                }
+            }
+
+            // Schedule next tick
+            Task::perform(tick_loop(), Message::Tick)
+        }
         Message::AlarmTimeChanged(value) => {
             state.alarm_time_input = value;
+            
+            // Start ticking if not already
+            if !state.ticking && !state.alarm_time_input.is_empty() {
+                Task::perform(tick_loop(), Message::Tick)
+            } else {
+                Task::none()
+            }
         }
         Message::SetAlarmPressed => {
             if state.alarm_time_input.len() == 5 && &state.alarm_time_input[2..3] == ":" {
                 state.alarm_time_set = Some(state.alarm_time_input.clone());
                 state.status = format!("Alarm set for {}", state.alarm_time_input);
-                
+                state.ticking = true;
+                // Start ticking
+                Task::perform(tick_loop(), Message::Tick)
             } else {
                 state.status = "Invalid time (use HH:MM)".into();
+                Task::none()
             }
         }
-
         Message::ReciteProtocol => {
             speak_protocol();
+            Task::none()
         }
     }
-    iced::Task::none()
 }
 
 fn view(state: &ProtocolAlarmApp) -> Element<'_, Message> {
@@ -57,18 +82,16 @@ fn view(state: &ProtocolAlarmApp) -> Element<'_, Message> {
     .spacing(8);
 
     let recite_button_row = row![
-            button("recite protocol").on_press(Message::ReciteProtocol),
-        ]
+        button("recite protocol").on_press(Message::ReciteProtocol),
+    ]
     .spacing(8);
 
     let input_row = row![
-
         text("Alarm (HH:MM):"),
         text_input("e.g. 09:30", &state.alarm_time_input)
             .on_input(Message::AlarmTimeChanged)
             .width(Length::Fixed(80.0)),
-            button("Set alarm").on_press(Message::SetAlarmPressed),
-
+        button("Set alarm").on_press(Message::SetAlarmPressed),
     ]
     .spacing(8);
 
@@ -85,6 +108,11 @@ fn view(state: &ProtocolAlarmApp) -> Element<'_, Message> {
         .spacing(12)
         .padding(16)
         .into()
+}
+
+async fn tick_loop() -> String {
+    sleep(Duration::from_secs(1)).await;
+    Local::now().format("%H:%M").to_string()
 }
 
 fn speak_protocol() {
