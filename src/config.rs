@@ -35,6 +35,7 @@ Rule 2: Never chase overbought or oversold prices.
 Rule 3: Always use a stop loss.
 Rule 4: Never average down.
 Rule 5: Stop trading when the account is down to 300 at 0.01 lot size, or 3000 at 0.3 lot size.
+Rule 6: only place a trade after the retracement or pullback.
 
 
 For clarity:

@@ -4,14 +4,10 @@ use crate::config::{ load_protocol, save_protocol };
 use chrono::{ Datelike, Local };
 use iced::widget::{ button, column, container, row, scrollable, text, text_input, radio };
 use iced::{ Element, Length, Task };
-use std::collections::HashSet;
 use std::process::Command as ProcCommand;
 use tokio::time::{ sleep, Duration };
 
 use iced::{ Theme, Color };
-
-use iced::widget::text_editor; // if you have the multi-line editor in your version
-// or keep text_input for now
 
 pub fn main() -> iced::Result {
     iced::run("Protocol Alarm", update, view)
@@ -61,9 +57,10 @@ struct ProtocolAlarmApp {
     alarms: Vec<Alarm>, // list of alarms
     status: String,
     ticking: bool,
-    fired_minutes: HashSet<String>, // which HH:MM have already fired this minute
+    last_fired_minute: Option<String>, // tracks last fired minute to prevent duplicates
 
-    protocol_text: String, // contents loaded from file
+    protocol_text: String, // cached contents from file
+    protocol_cached: bool, // whether protocol has been loaded into memory
     protocol_dirty: bool, // whether user has unsaved edits
 }
 
@@ -84,22 +81,22 @@ enum Message {
 fn update(state: &mut ProtocolAlarmApp, message: Message) -> Task<Message> {
     match message {
         Message::Tick(now) => {
-            if load_protocol().is_empty() {
+            // Cache protocol text on first tick (lazy load)
+            if !state.protocol_cached {
                 state.protocol_text = load_protocol();
+                state.protocol_cached = true;
             }
-            state.current_time = now.clone();
 
             // If this is the first Tick after startup, start ticking
             if !state.ticking {
                 state.ticking = true;
             }
 
-            // New minute? Clear fired markers so alarms can fire again later.
-            if !state.fired_minutes.contains(&now) {
-                state.fired_minutes.clear();
-            }
+            // Only check for alarm if minute changed (prevents repeated checks)
+            let minute_changed = state.last_fired_minute.as_ref() != Some(&now);
+            state.current_time = now.clone();
 
-            if !state.alarms.is_empty() && !state.fired_minutes.contains(&now) {
+            if !state.alarms.is_empty() && minute_changed {
                 let mut any_fired = false;
 
                 for alarm in &state.alarms {
@@ -111,14 +108,13 @@ fn update(state: &mut ProtocolAlarmApp, message: Message) -> Task<Message> {
                             alarm.pattern.label(),
                             alarm.recites
                         );
-                        for _ in 0..alarm.recites {
-                            speak_protocol(load_protocol().as_str());
-                        }
+                        // Batch recitations into single say command call
+                        speak_protocol_batch(&state.protocol_text, alarm.recites);
                     }
                 }
 
                 if any_fired {
-                    state.fired_minutes.insert(now.clone());
+                    state.last_fired_minute = Some(now);
                 }
             }
 
@@ -162,40 +158,34 @@ fn update(state: &mut ProtocolAlarmApp, message: Message) -> Task<Message> {
             }
 
             // Avoid duplicates with same time + pattern + recites
-            let exists = state.alarms
-                .iter()
-                .any(
-                    |a| a.time == raw && a.pattern == state.selected_pattern && a.recites == recites
-                );
-
-            if !exists {
-                state.alarms.push(Alarm {
-                    time: raw.clone(),
-                    pattern: state.selected_pattern,
-                    recites,
-                });
-                state.status = format!(
-                    "Added alarm: {} ({}, x{})",
-                    raw,
-                    state.selected_pattern.label(),
-                    recites
-                );
-                state.alarm_time_input.clear();
-                state.recites_input.clear();
-
-                // Start ticking if we weren't already
-                state.ticking = true;
-                state.fired_minutes.clear();
-                Task::perform(tick_loop(), Message::Tick)
-            } else {
+            if state.alarms.iter().any(|a| a.time == raw && a.pattern == state.selected_pattern && a.recites == recites) {
                 state.status = format!(
                     "Alarm {} ({}, x{}) already exists",
                     raw,
                     state.selected_pattern.label(),
                     recites
                 );
-                Task::none()
+                return Task::none();
             }
+
+            state.alarms.push(Alarm {
+                time: raw.clone(),
+                pattern: state.selected_pattern,
+                recites,
+            });
+            state.status = format!(
+                "Added alarm: {} ({}, x{})",
+                raw,
+                state.selected_pattern.label(),
+                recites
+            );
+            state.alarm_time_input.clear();
+            state.recites_input.clear();
+
+            // Start ticking if we weren't already
+            state.ticking = true;
+            state.last_fired_minute = None; // Reset on new alarm
+            Task::perform(tick_loop(), Message::Tick)
         }
 
         Message::CancelAlarm(index) => {
@@ -220,7 +210,11 @@ fn update(state: &mut ProtocolAlarmApp, message: Message) -> Task<Message> {
         }
 
         Message::ReciteProtocol => {
-            speak_protocol(load_protocol().as_str());
+            // Use cached protocol text, not fresh load
+            if state.protocol_text.is_empty() {
+                state.protocol_text = load_protocol();
+            }
+            speak_protocol_batch(&state.protocol_text, 1);
             Task::none()
         }
 
@@ -436,8 +430,23 @@ fn secondary_button_style(_theme: &Theme, _status: button::Status) -> button::St
     }
 }
 
-fn speak_protocol(text: &str) {
-    let status = ProcCommand::new("say").arg("-r").arg("180").arg(text).status();
+fn speak_protocol_batch(text: &str, count: u32) {
+    // Build a single command with all recitations batched
+    // Repeat the text N times with separators for natural pauses
+    let mut full_text = String::new();
+    for i in 0..count {
+        if i > 0 {
+            full_text.push_str(". ");
+        }
+        full_text.push_str(text);
+    }
+
+    // Single process call instead of N process calls
+    let status = ProcCommand::new("say")
+        .arg("-r")
+        .arg("180")
+        .arg(&full_text)
+        .status();
 
     if let Err(e) = status {
         eprintln!("Failed to execute `say`: {}", e);
